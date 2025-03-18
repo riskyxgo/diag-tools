@@ -260,7 +260,7 @@ export default {
       }
     },
     checkWarnings(component, status) {
-      if (status.delay > 2000) {
+      if (status.delay > 5000) {
         const warnData = {
           timestamp: new Date().toISOString(),
           type: 'Warning',
@@ -271,15 +271,15 @@ export default {
         this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 01: Delay too long (${status.delay} ms > 2000 ms)` });
         this.saveError(warnData);
       }
-      if (status.totalTime > 20000) {
+      if (status.totalTime > 5000) {
         const warnData = {
           timestamp: new Date().toISOString(),
           type: 'Warning',
           code: '02',
-          description: `Total time too long (${status.totalTime} ms > 20000 ms)`,
+          description: `Total time too long (${status.totalTime} ms > 5000 ms)`,
           component: component
         };
-        this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 02: Total time too long (${status.totalTime} ms > 20000 ms)` });
+        this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 02: Total time too long (${status.totalTime} ms > 5000 ms)` });
         this.saveError(warnData);
       }
     },
@@ -418,7 +418,7 @@ export default {
         checkMotorDc.sendCommand('JUAL', row, column, index);
 
         // Tunggu 20 detik sebelum motor berikutnya
-        await new Promise(resolve => setTimeout(resolve, 20000));
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Pastikan motor selesai sebelum lanjut
         while (this.activeMotorIndex !== null && this.isDiagnosticRunning) {
