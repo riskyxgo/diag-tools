@@ -13,6 +13,11 @@
           Run Diagnostic
         </button>
         <button
+          @click="cycleMultiplier"
+          class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded">
+          Multiplier: {{ multiplier }}x
+        </button>
+        <button
           v-if="isDiagnosticRunning"
           @click="stopDiagnostic"
           class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">
@@ -40,6 +45,7 @@
       :client="isSimulationActive ? simulatedClient : client"
       :device-id="deviceId"
       :motor-status="motorDcStatus"
+      :multiplier="multiplier"
       @start-motor-test="startMotorDcTest" />
 
     <!-- Komponen Adjust Motor Dc -->
@@ -63,7 +69,8 @@
       :device-id="deviceId"
       :motor-dc-status="motorDcStatus"
       :stepper-status="stepperStatus"
-      :error-logs="errorLogs" />
+      :error-logs="errorLogs"
+      :multiplier="multiplier" />
   </div>
 </template>
 
@@ -96,6 +103,7 @@ export default {
       simulatedClient: { connected: true },
       isSimulationActive: false,
       isDiagnosticRunning: false,
+      multiplier: 1, // Default multiplier 1x
       stepperStatus: {
         expectedMessages: [
           'Stepper putar naik',
@@ -111,7 +119,10 @@ export default {
         delay: null,
         totalTime: null,
         completed: false,
-        isActive: false
+        isActive: false,
+        testCount: 0,
+        delayHistory: [],
+        totalTimeHistory: []
       },
       motorDcStatus: Array(32).fill(null).map(() => ({
         expectedMessages: [
@@ -130,7 +141,10 @@ export default {
         delay: null,
         totalTime: null,
         completed: false,
-        isActive: false
+        isActive: false,
+        testCount: 0,
+        delayHistory: [],
+        totalTimeHistory: []
       })),
       activeMotorIndex: null
     }
@@ -140,6 +154,17 @@ export default {
       let errors = JSON.parse(localStorage.getItem('errors')) || [];
       errors.push(error);
       localStorage.setItem('errors', JSON.stringify(errors));
+    },
+    getLimitSwitchId() {
+      return Math.floor(Math.random() * 4) + 11; // 11, 12, 13, atau 14
+    },
+    cycleMultiplier() {
+      // Siklus antara 1x, 10x, 100x, 1000x, 10000x
+      if (this.multiplier === 1) this.multiplier = 10;
+      else if (this.multiplier === 10) this.multiplier = 100;
+      else if (this.multiplier === 100) this.multiplier = 1000;
+      else if (this.multiplier === 1000) this.multiplier = 10000;
+      else this.multiplier = 1;
     },
     handleMessage(topic, message) {
       const msg = message.toString();
@@ -161,6 +186,18 @@ export default {
           this.errorLogs.push({ type: 'Error', message: `Stepper - Error 01: Timeout detected` });
           this.saveError(errorData);
           this.stepperStatus.isActive = false;
+        } else if (msg.includes('Limit Switch')) {
+          const limitSwitchId = this.getLimitSwitchId();
+          const errorData = {
+            timestamp: new Date().toISOString(),
+            type: 'Error',
+            code: limitSwitchId.toString().padStart(2, '0'),
+            description: `Limit Switch triggered (ID:${limitSwitchId})`,
+            component: 'Stepper'
+          };
+          this.errorLogs.push({ type: 'Error', message: `Stepper - Error ${limitSwitchId.toString().padStart(2, '0')}: Limit Switch triggered (ID:${limitSwitchId})` });
+          this.saveError(errorData);
+          this.stepperStatus.isActive = false;
         } else if (nextExpectedIndex < this.stepperStatus.expectedMessages.length && !msg.includes(expectedMsg)) {
           const errorData = {
             timestamp: new Date().toISOString(),
@@ -176,17 +213,20 @@ export default {
           const currentTime = Date.now();
           if (this.stepperStatus.receivedMessages.length === 1) {
             this.stepperStatus.firstMessageTime = currentTime;
-            this.stepperStatus.delay = currentTime - this.stepperStatus.commandSentTime; // Hitung delay
+            this.stepperStatus.delay = currentTime - this.stepperStatus.commandSentTime;
+            this.stepperStatus.delayHistory.push(this.stepperStatus.delay);
           }
           if (this.stepperStatus.receivedMessages.length === this.stepperStatus.expectedMessages.length) {
             this.stepperStatus.lastMessageTime = currentTime;
-            this.stepperStatus.totalTime = currentTime - this.stepperStatus.commandSentTime; // Hitung total time
+            this.stepperStatus.totalTime = currentTime - this.stepperStatus.commandSentTime;
+            this.stepperStatus.totalTimeHistory.push(this.stepperStatus.totalTime);
             this.stepperStatus.completed = true;
             this.stepperStatus.isActive = false;
             this.checkWarnings('Stepper', this.stepperStatus);
           }
         }
       }
+
       if (this.activeMotorIndex !== null && topic === 'esp32/StatusRly') {
         const motor = this.motorDcStatus[this.activeMotorIndex];
         const nextExpectedIndex = motor.receivedMessages.length;
@@ -201,6 +241,19 @@ export default {
             component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`
           };
           this.errorLogs.push({ type: 'Error', message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 01: Timeout detected` });
+          this.saveError(errorData);
+          motor.isActive = false;
+          this.activeMotorIndex = null;
+        } else if (msg.includes('Limit Switch')) {
+          const limitSwitchId = this.getLimitSwitchId();
+          const errorData = {
+            timestamp: new Date().toISOString(),
+            type: 'Error',
+            code: limitSwitchId.toString().padStart(2, '0'),
+            description: `Limit Switch triggered (ID:${limitSwitchId})`,
+            component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`
+          };
+          this.errorLogs.push({ type: 'Error', message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error ${limitSwitchId.toString().padStart(2, '0')}: Limit Switch triggered (ID:${limitSwitchId})` });
           this.saveError(errorData);
           motor.isActive = false;
           this.activeMotorIndex = null;
@@ -221,10 +274,12 @@ export default {
           if (motor.receivedMessages.length === 1) {
             motor.firstMessageTime = currentTime;
             motor.delay = currentTime - motor.commandSentTime;
+            motor.delayHistory.push(motor.delay);
           }
           if (motor.receivedMessages.length === motor.expectedMessages.length) {
             motor.lastMessageTime = currentTime;
             motor.totalTime = currentTime - motor.commandSentTime;
+            motor.totalTimeHistory.push(motor.totalTime);
             motor.completed = true;
             motor.isActive = false;
             this.checkWarnings(`Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`, motor);
@@ -260,7 +315,7 @@ export default {
       }
     },
     checkWarnings(component, status) {
-      if (status.delay > 5000) {
+      if (status.delay > 2000) {
         const warnData = {
           timestamp: new Date().toISOString(),
           type: 'Warning',
@@ -271,15 +326,15 @@ export default {
         this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 01: Delay too long (${status.delay} ms > 2000 ms)` });
         this.saveError(warnData);
       }
-      if (status.totalTime > 5000) {
+      if (status.totalTime > 25000) {
         const warnData = {
           timestamp: new Date().toISOString(),
           type: 'Warning',
           code: '02',
-          description: `Total time too long (${status.totalTime} ms > 5000 ms)`,
+          description: `Total time too long (${status.totalTime} ms > 25000 ms)`,
           component: component
         };
-        this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 02: Total time too long (${status.totalTime} ms > 5000 ms)` });
+        this.errorLogs.push({ type: 'Warning', message: `${component} - Warn 02: Total time too long (${status.totalTime} ms > 25000 ms)` });
         this.saveError(warnData);
       }
     },
@@ -296,13 +351,14 @@ export default {
     },
     resetStepperStatus() {
       this.stepperStatus.receivedMessages = [];
-      this.stepperStatus.commandSentTime = Date.now(); // Set waktu perintah dikirim
+      this.stepperStatus.commandSentTime = Date.now();
       this.stepperStatus.firstMessageTime = null;
       this.stepperStatus.lastMessageTime = null;
       this.stepperStatus.delay = null;
       this.stepperStatus.totalTime = null;
       this.stepperStatus.completed = false;
       this.stepperStatus.isActive = true;
+      this.stepperStatus.testCount++;
       if (this.isSimulationActive) {
         this.simulateStepperMessages();
       }
@@ -319,6 +375,7 @@ export default {
         motor.totalTime = null;
         motor.completed = false;
         motor.isActive = true;
+        motor.testCount++;
         if (this.isSimulationActive) {
           this.simulateMotorDcMessages(index);
         }
@@ -339,6 +396,9 @@ export default {
 
           if (rand < 0.1) {
             simulatedMsg = "Timeout occurred";
+          } else if (rand < 0.15) {
+            const limitSwitchId = this.getLimitSwitchId();
+            simulatedMsg = `Limit Switch triggered (ID:${limitSwitchId})`;
           } else if (rand < 0.2) {
             simulatedMsg = messages[Math.floor(Math.random() * messages.length)];
           } else if (currentIndex < messages.length) {
@@ -367,6 +427,9 @@ export default {
 
           if (rand < 0.1) {
             simulatedMsg = "Timeout occurred";
+          } else if (rand < 0.15) {
+            const limitSwitchId = this.getLimitSwitchId();
+            simulatedMsg = `Limit Switch triggered (ID:${limitSwitchId})`;
           } else if (rand < 0.2) {
             simulatedMsg = messages[Math.floor(Math.random() * messages.length)];
           } else if (currentIndex < messages.length) {
@@ -395,7 +458,7 @@ export default {
       if (this.isDiagnosticRunning) return;
 
       this.isDiagnosticRunning = true;
-      console.log("Starting full diagnostic...");
+      console.log(`Starting full diagnostic with multiplier ${this.multiplier}x...`);
 
       const checkMotorDc = this.$refs.checkMotorDc;
       if (!checkMotorDc) {
@@ -412,29 +475,49 @@ export default {
           return;
         }
 
-        console.log(`Testing Motor Dc [${this.getMotorLabel(index)}]...`);
         const row = checkMotorDc.getRow(index);
         const column = checkMotorDc.getColumn(index);
-        checkMotorDc.sendCommand('JUAL', row, column, index);
 
-        // Tunggu 20 detik sebelum motor berikutnya
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Ulangi pengujian untuk motor ini sebanyak multiplier
+        for (let i = 0; i < this.multiplier; i++) {
+          if (!this.isDiagnosticRunning) {
+            console.log("Diagnostic stopped during multiplier loop.");
+            this.activeMotorIndex = null;
+            return;
+          }
 
-        // Pastikan motor selesai sebelum lanjut
-        while (this.activeMotorIndex !== null && this.isDiagnosticRunning) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+          console.log(`Testing Motor Dc [${this.getMotorLabel(index)}] - Iteration ${i + 1}/${this.multiplier}`);
+          checkMotorDc.sendCommand('JUAL', row, column, index);
+
+          // Tunggu hingga pengujian motor selesai
+          await new Promise(resolve => {
+            const checkCompletion = () => {
+              if (this.activeMotorIndex === null || !this.isDiagnosticRunning) {
+                resolve();
+              } else {
+                setTimeout(checkCompletion, 100);
+              }
+            };
+            checkCompletion();
+          });
         }
       }
 
-      // Jalankan stepper setelah semua motor selesai
+      // Jalankan stepper setelah semua motor selesai (tanpa multiplier)
       if (this.isDiagnosticRunning) {
         console.log("Testing Stepper...");
         this.resetStepperStatus();
 
-        // Tunggu hingga stepper selesai
-        while (this.stepperStatus.isActive && this.isDiagnosticRunning) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
+        await new Promise(resolve => {
+          const checkCompletion = () => {
+            if (!this.stepperStatus.isActive || !this.isDiagnosticRunning) {
+              resolve();
+            } else {
+              setTimeout(checkCompletion, 100);
+            }
+          };
+          checkCompletion();
+        });
       }
 
       if (this.isDiagnosticRunning) {

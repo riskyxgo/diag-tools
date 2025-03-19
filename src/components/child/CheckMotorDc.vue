@@ -19,8 +19,18 @@
               @click="sendCommand('JUAL', getRow(index), getColumn(index), index)"
               @mouseenter="hoveredIndex = index"
               @mouseleave="hoveredIndex = null"
-              class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-4 rounded w-full">
-              {{ motorStatus[index] && motorStatus[index].completed ? 'OK' : `${getRow(index)}:${getColumn(index)}` }}
+              :disabled="isAnyMotorActive && !motorStatus[index].isActive"
+              class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-4 rounded w-full relative flex items-center justify-center"
+              :class="{ 'opacity-50 cursor-not-allowed': isAnyMotorActive && !motorStatus[index].isActive }">
+              <span v-if="motorStatus[index].isActive" class="absolute inset-0 flex items-center justify-center">
+                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+              <span :class="{ 'invisible': motorStatus[index].isActive }">
+                {{ motorStatus[index] && motorStatus[index].completed ? 'OK' : `${getRow(index)}:${getColumn(index)}` }}
+              </span>
             </button>
             <div
               v-if="hoveredIndex === index && motorStatus[index] && (motorStatus[index].delay !== null || motorStatus[index].totalTime !== null)"
@@ -41,8 +51,18 @@
               @click="sendCommand('JUAL', getRow(index + 16), getColumn(index), index + 16)"
               @mouseenter="hoveredIndex = index + 16"
               @mouseleave="hoveredIndex = null"
-              class="bg-green-500 hover:bg-green-600 text-white px-2 py-4 rounded w-full">
-              {{ motorStatus[index + 16] && motorStatus[index + 16].completed ? 'OK' : `${getRow(index + 16)}:${getColumn(index)}` }}
+              :disabled="isAnyMotorActive && !motorStatus[index + 16].isActive"
+              class="bg-green-500 hover:bg-green-600 text-white px-2 py-4 rounded w-full relative flex items-center justify-center"
+              :class="{ 'opacity-50 cursor-not-allowed': isAnyMotorActive && !motorStatus[index + 16].isActive }">
+              <span v-if="motorStatus[index + 16].isActive" class="absolute inset-0 flex items-center justify-center">
+                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+              <span :class="{ 'invisible': motorStatus[index + 16].isActive }">
+                {{ motorStatus[index + 16] && motorStatus[index + 16].completed ? 'OK' : `${getRow(index + 16)}:${getColumn(index)}` }}
+              </span>
             </button>
             <div
               v-if="hoveredIndex === index + 16 && motorStatus[index + 16] && (motorStatus[index + 16].delay !== null || motorStatus[index + 16].totalTime !== null)"
@@ -63,12 +83,18 @@ export default {
   props: {
     client: Object,
     deviceId: String,
-    motorStatus: Array
+    motorStatus: Array,
+    multiplier: Number // Terima multiplier dari parent
   },
   data() {
     return {
       isOpen: false,
       hoveredIndex: null
+    }
+  },
+  computed: {
+    isAnyMotorActive() {
+      return this.motorStatus.some(motor => motor.isActive);
     }
   },
   methods: {
@@ -80,18 +106,35 @@ export default {
       const col = (index % 8) + 1;
       return 'C' + col.toString().padStart(2, '0');
     },
-    sendCommand(command, row, column, index) {
+    async sendCommand(command, row, column, index) {
       const topic = 'esp32/CtrlRelay';
       const message = `${this.deviceId} ${command} ${row}:${column}`;
+
       if (this.client && this.client.connected) {
-        this.$emit('start-motor-test', { index, commandSentTime: Date.now() });
-        this.client.publish(topic, message, { qos: 1 }, (err) => {
-          if (err) {
-            console.error("Publish error:", err);
-          } else {
-            console.log("Command sent:", message);
-          }
-        });
+        // Ulangi pengujian sebanyak multiplier
+        for (let i = 0; i < this.multiplier; i++) {
+          console.log(`Testing ${row}:${column} - Iteration ${i + 1}/${this.multiplier}`);
+          this.$emit('start-motor-test', { index, commandSentTime: Date.now() });
+          await new Promise((resolve, reject) => {
+            this.client.publish(topic, message, { qos: 1 }, (err) => {
+              if (err) {
+                console.error("Publish error:", err);
+                reject(err);
+              } else {
+                console.log("Command sent:", message);
+                // Tunggu hingga pengujian selesai sebelum iterasi berikutnya
+                const checkCompletion = () => {
+                  if (!this.motorStatus[index].isActive) {
+                    resolve();
+                  } else {
+                    setTimeout(checkCompletion, 100);
+                  }
+                };
+                checkCompletion();
+              }
+            });
+          });
+        }
       } else {
         console.error("MQTT client belum terkoneksi");
       }
