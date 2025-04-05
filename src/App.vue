@@ -15,13 +15,15 @@
         <div class="flex space-x-4">
           <button
             @click="switchTo('connection')"
-            class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+            class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+          >
             Sambungkan
           </button>
           <button
             :disabled="!connected"
             @click="switchTo('diag')"
-            class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+            class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Run Diag
           </button>
         </div>
@@ -37,7 +39,8 @@
               id="host"
               v-model="connection.host"
               placeholder="contoh: z25505c1.ala.asia-southeast1.emqxsl.com"
-              class="w-full border rounded p-2" />
+              class="w-full border rounded p-2"
+            />
           </div>
           <div>
             <label for="port" class="block text-gray-700">WebSocket Port (TLS):</label>
@@ -46,7 +49,8 @@
               v-model="connection.port"
               type="number"
               placeholder="contoh: 8084"
-              class="w-full border rounded p-2" />
+              class="w-full border rounded p-2"
+            />
           </div>
           <div>
             <label for="username" class="block text-gray-700">Username:</label>
@@ -54,7 +58,8 @@
               id="username"
               v-model="connection.username"
               placeholder="contoh: webcontrol"
-              class="w-full border rounded p-2" />
+              class="w-full border rounded p-2"
+            />
           </div>
           <div>
             <label for="password" class="block text-gray-700">Password:</label>
@@ -63,19 +68,28 @@
               v-model="connection.password"
               type="password"
               placeholder="contoh: 123456789"
-              class="w-full border rounded p-2" />
+              class="w-full border rounded p-2"
+            />
           </div>
           <div class="flex justify-between mt-4">
-            <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+            <button
+              type="submit"
+              class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+            >
               Hubungkan
             </button>
-            <button type="button" class="bg-gray-300 hover:bg-gray-200 px-6 py-2 rounded" @click="switchTo('initial')">
+            <button
+              type="button"
+              class="bg-gray-300 hover:bg-gray-200 px-6 py-2 rounded"
+              @click="switchTo('initial')"
+            >
               Kembali
             </button>
             <button
               type="button"
               @click="disconnectMqtt"
-              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">
+              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
+            >
               Putuskan
             </button>
           </div>
@@ -92,7 +106,8 @@
           <!-- sticky top-0 z-50 bg-blue-600 text-white p-2 text-center -->
           <button
             @click="goBackToInitial"
-            class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">
+            class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+          >
             Kembali ke Dashboard
           </button>
         </div>
@@ -118,69 +133,69 @@ export default {
       connection: {
         host: 'z25505c1.ala.asia-southeast1.emqxsl.com',
         port: '8084', // WebSocket TLS port
-        username: 'webcontrol',
-        password: '123456789'
-      }
+        username: 'vendingdua',
+        password: '123456789',
+      },
     }
   },
   methods: {
     switchTo(view) {
-      localStorage.removeItem('errors');
-      this.currentView = view;
+      localStorage.removeItem('errors')
+      this.currentView = view
     },
     connectMqtt() {
-      this.errorMessage = '';
+      this.errorMessage = ''
       if (this.client) {
-        this.client.end(true);
-        this.client = null;
-        this.connect = false; // Reset state
+        this.client.end(true)
+        this.client = null
+        this.connect = false // Reset state
       }
 
-      const url = `wss://${this.connection.host}:${this.connection.port}/mqtt`;
+      const url = `wss://${this.connection.host}:${this.connection.port}/mqtt`
       const options = {
         protocol: 'wss',
         username: this.connection.username,
         password: this.connection.password,
-        reconnectPeriod: 1000
-      };
+        reconnectPeriod: 1000,
+      }
 
       // Membuat koneksi MQTT
-      this.client = mqtt.connect(url, options);
+      this.client = mqtt.connect(url, options)
 
       this.client.on('connect', () => {
-        this.connected = true;
-        console.log("Terkoneksi ke MQTT Broker");
+        this.connected = true
+        console.log('Terkoneksi ke MQTT Broker')
         // Subscribe ke topik status
         this.client.subscribe('esp32/StatusRly', { qos: 1 }, (err) => {
           if (err) {
-            console.error("Subscription error:", err);
+            console.error('Subscription error:', err)
           }
-        });
+        })
         // Setelah koneksi sukses, otomatis alihkan ke tampilan diag
-        this.currentView = 'diag';
-      });
+        this.currentView = 'diag'
+      })
 
       this.client.on('error', (err) => {
-        console.error("MQTT Connection Error:", err);
-        this.errorMessage = "Gagal terhubung: " + err.message;
-        this.connected = false;
-      });
+        console.error('MQTT Connection Error:', err)
+        this.errorMessage = 'Gagal terhubung: ' + err.message
+        this.connected = false
+      })
 
       this.client.on('close', () => {
-        this.connected = false;
-      });
+        this.connected = false
+      })
     },
     disconnectMqtt() {
       if (this.client) {
-        this.client.end();
-        this.connected = false;
-        console.log("Terputus dari MQTT Broker");
+        this.client.end()
+        this.connected = false
+        console.log('Terputus dari MQTT Broker')
       }
     },
     goBackToInitial() {
-      this.currentView = 'initial';
-    }
-  }
+      this.currentView = 'initial'
+    },
+  },
 }
 </script>
 

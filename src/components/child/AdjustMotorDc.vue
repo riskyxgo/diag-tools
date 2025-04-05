@@ -11,7 +11,7 @@
     </div>
     <div v-if="isOpen" class="grid grid-cols-4 md:grid-cols-8 gap-4">
       <button
-        v-for="(btn, index) in 16"
+        v-for="(btn, index) in 48"
         :key="'adj' + index"
         @click="sendAdjustCommand(getRow(index), getColumn(index))"
         class="bg-purple-500 hover:bg-purple-600 text-white px-2 py-4 rounded">
@@ -35,11 +35,11 @@ export default {
   },
   methods: {
     getRow(index) {
-      const row = Math.floor(index / 8) + 1;
+      const row = Math.floor(index / 8) + 1; // 6 baris (R01 - R06)
       return 'R' + row.toString().padStart(2, '0');
     },
     getColumn(index) {
-      const col = (index % 8) + 1;
+      const col = (index % 8) + 1; // 8 kolom (C01 - C08)
       return 'C' + col.toString().padStart(2, '0');
     },
     sendAdjustCommand(row, column) {

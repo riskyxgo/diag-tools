@@ -97,7 +97,7 @@ export default {
   props: ['client'],
   data() {
     return {
-      deviceId: 'ArUTx-1234',
+      deviceId: 'QrtVB-8888',
       statusMessages: [],
       errorLogs: [],
       simulatedClient: { connected: true },
@@ -124,7 +124,7 @@ export default {
         delayHistory: [],
         totalTimeHistory: []
       },
-      motorDcStatus: Array(32).fill(null).map(() => ({
+      motorDcStatus: Array(48).fill(null).map(() => ({
         expectedMessages: [
           'Stepper putar naik',
           'Stepper sampai posisi',
