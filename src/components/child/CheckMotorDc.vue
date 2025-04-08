@@ -109,20 +109,33 @@ export default {
     async sendCommand(command, row, column, index) {
       const topic = 'esp32/CtrlRelay'
       const message = `${this.deviceId} ${command} ${row}:${column}`
+      const TIMEOUT_DURATION = 10000 // 10 detik (bisa disesuaikan)
 
       if (this.client && this.client.connected) {
         for (let i = 0; i < this.multiplier; i++) {
           console.log(`Testing ${row}:${column} - Iteration ${i + 1}/${this.multiplier}`)
           this.$emit('start-motor-test', { index, commandSentTime: Date.now() })
+
+          // Promise untuk publish dan timeout
           await new Promise((resolve, reject) => {
+            // Set timeout
+            const timeoutId = setTimeout(() => {
+              console.log(`Timeout after ${TIMEOUT_DURATION}ms for ${row}:${column}`)
+              this.$emit('timeout-motor-test', { index }) // Emit event untuk timeout
+              resolve() // Selesaikan promise jika timeout
+            }, TIMEOUT_DURATION)
+
+            // Publish pesan MQTT
             this.client.publish(topic, message, { qos: 1 }, (err) => {
               if (err) {
                 console.error('Publish error:', err)
+                clearTimeout(timeoutId) // Hentikan timeout jika ada error
                 reject(err)
               } else {
                 console.log('Command sent:', message)
                 const checkCompletion = () => {
                   if (!this.motorStatus[index].isActive) {
+                    clearTimeout(timeoutId) // Hentikan timeout jika selesai
                     resolve()
                   } else {
                     setTimeout(checkCompletion, 100)
@@ -131,6 +144,8 @@ export default {
                 checkCompletion()
               }
             })
+          }).catch((err) => {
+            console.error('Error during test:', err)
           })
         }
       } else {
