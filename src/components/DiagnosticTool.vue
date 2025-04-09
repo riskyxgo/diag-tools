@@ -115,7 +115,7 @@ export default {
       simulatedClient: { connected: true },
       isSimulationActive: false,
       isDiagnosticRunning: false,
-      multiplier: 1, // Default multiplier 1x
+      multiplier: 1,
       stepperStatus: {
         expectedMessages: [
           'Stepper putar naik',
@@ -170,10 +170,9 @@ export default {
       localStorage.setItem('errors', JSON.stringify(errors))
     },
     getLimitSwitchId() {
-      return Math.floor(Math.random() * 4) + 11 // 11, 12, 13, atau 14
+      return Math.floor(Math.random() * 4) + 11
     },
     cycleMultiplier() {
-      // Siklus antara 1x, 10x, 100x, 1000x, 10000x
       if (this.multiplier === 1) this.multiplier = 10
       else if (this.multiplier === 10) this.multiplier = 100
       else if (this.multiplier === 100) this.multiplier = 1000
@@ -440,12 +439,10 @@ export default {
         console.log('Pengujian lain sedang berlangsung. Harap tunggu hingga selesai.')
       }
     },
-
-    // Tambahkan method untuk menangani timeout
     handleMotorDcTimeout({ index }) {
       const motor = this.motorDcStatus[index]
-      motor.isActive = false // Hentikan loading
-      this.activeMotorIndex = null // Reset active motor
+      motor.isActive = false
+      this.activeMotorIndex = null
       const errorData = {
         timestamp: new Date().toISOString(),
         type: 'Error',
@@ -459,7 +456,6 @@ export default {
       })
       this.saveError(errorData)
     },
-
     simulateStepperMessages() {
       const messages = this.stepperStatus.expectedMessages.slice()
       let currentIndex = 0
@@ -531,6 +527,7 @@ export default {
         this.isDiagnosticRunning = false
       }
     },
+
     async runDiagnostic() {
       if (this.isDiagnosticRunning) return
 
@@ -566,9 +563,9 @@ export default {
           console.log(
             `Testing Motor Dc [${this.getMotorLabel(index)}] - Iteration ${i + 1}/${this.multiplier}`,
           )
-          checkMotorDc.sendCommand('JUAL', row, column, index)
+          await checkMotorDc.sendCommand('JUAL', row, column, index)
 
-          // Tunggu hingga pengujian motor selesai
+          // Tunggu hingga pengujian selesai (termasuk timeout dari sendCommand)
           await new Promise((resolve) => {
             const checkCompletion = () => {
               if (this.activeMotorIndex === null || !this.isDiagnosticRunning) {
@@ -587,9 +584,29 @@ export default {
         console.log('Testing Stepper...')
         this.resetStepperStatus()
 
+        const TIMEOUT_DURATION = 10000 // 10 detik untuk stepper
         await new Promise((resolve) => {
+          const timeoutId = setTimeout(() => {
+            console.log(`Timeout after ${TIMEOUT_DURATION}ms for Stepper`)
+            this.stepperStatus.isActive = false
+            const errorData = {
+              timestamp: new Date().toISOString(),
+              type: 'Error',
+              code: '01',
+              description: 'Timeout detected - No response from stepper',
+              component: 'Stepper',
+            }
+            this.errorLogs.push({
+              type: 'Error',
+              message: `Stepper - Error 01: Timeout detected - No response from stepper`,
+            })
+            this.saveError(errorData)
+            resolve()
+          }, TIMEOUT_DURATION)
+
           const checkCompletion = () => {
             if (!this.stepperStatus.isActive || !this.isDiagnosticRunning) {
+              clearTimeout(timeoutId)
               resolve()
             } else {
               setTimeout(checkCompletion, 100)
@@ -604,6 +621,7 @@ export default {
         this.isDiagnosticRunning = false
       }
     },
+
     stopDiagnostic() {
       this.isDiagnosticRunning = false
       this.activeMotorIndex = null
