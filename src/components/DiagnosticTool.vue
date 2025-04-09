@@ -161,9 +161,13 @@ export default {
           totalTimeHistory: [],
         })),
       activeMotorIndex: null,
+      abortController: null,
     }
   },
   methods: {
+    handleBeforeUnload() {
+      this.stopDiagnostic() // Hentikan diagnostik saat web ditutup
+    },
     saveError(error) {
       let errors = JSON.parse(localStorage.getItem('errors')) || []
       errors.push(error)
@@ -181,76 +185,11 @@ export default {
     },
     handleMessage(topic, message) {
       const msg = message.toString()
+      console.log(
+        `Pesan diterima: ${msg}, Active Motor: ${this.activeMotorIndex !== null ? this.getMotorLabel(this.activeMotorIndex) : 'None'}`,
+      )
       const fullMessage = `Topic: ${topic} | Pesan: ${msg}`
       this.statusMessages.push(fullMessage)
-
-      if (this.stepperStatus.isActive && topic === 'esp32/StatusRly') {
-        const nextExpectedIndex = this.stepperStatus.receivedMessages.length
-        const expectedMsg = this.stepperStatus.expectedMessages[nextExpectedIndex]
-
-        if (msg.includes('Timeout')) {
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: '01',
-            description: 'Timeout detected',
-            component: 'Stepper',
-          }
-          this.errorLogs.push({ type: 'Error', message: `Stepper - Error 01: Timeout detected` })
-          this.saveError(errorData)
-          this.stepperStatus.isActive = false
-        } else if (msg.includes('Limit Switch')) {
-          const limitSwitchId = this.getLimitSwitchId()
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: limitSwitchId.toString().padStart(2, '0'),
-            description: `Limit Switch triggered (ID:${limitSwitchId})`,
-            component: 'Stepper',
-          }
-          this.errorLogs.push({
-            type: 'Error',
-            message: `Stepper - Error ${limitSwitchId.toString().padStart(2, '0')}: Limit Switch triggered (ID:${limitSwitchId})`,
-          })
-          this.saveError(errorData)
-          this.stepperStatus.isActive = false
-        } else if (
-          nextExpectedIndex < this.stepperStatus.expectedMessages.length &&
-          !msg.includes(expectedMsg)
-        ) {
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: '02',
-            description: `Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
-            component: 'Stepper',
-          }
-          this.errorLogs.push({
-            type: 'Error',
-            message: `Stepper - Error 02: Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
-          })
-          this.saveError(errorData)
-        } else if (msg.includes(expectedMsg)) {
-          this.stepperStatus.receivedMessages.push(msg)
-          const currentTime = Date.now()
-          if (this.stepperStatus.receivedMessages.length === 1) {
-            this.stepperStatus.firstMessageTime = currentTime
-            this.stepperStatus.delay = currentTime - this.stepperStatus.commandSentTime
-            this.stepperStatus.delayHistory.push(this.stepperStatus.delay)
-          }
-          if (
-            this.stepperStatus.receivedMessages.length ===
-            this.stepperStatus.expectedMessages.length
-          ) {
-            this.stepperStatus.lastMessageTime = currentTime
-            this.stepperStatus.totalTime = currentTime - this.stepperStatus.commandSentTime
-            this.stepperStatus.totalTimeHistory.push(this.stepperStatus.totalTime)
-            this.stepperStatus.completed = true
-            this.stepperStatus.isActive = false
-            this.checkWarnings('Stepper', this.stepperStatus)
-          }
-        }
-      }
 
       if (this.activeMotorIndex !== null && topic === 'esp32/StatusRly') {
         const motor = this.motorDcStatus[this.activeMotorIndex]
@@ -258,56 +197,29 @@ export default {
         const expectedMsg = motor.expectedMessages[nextExpectedIndex]
 
         if (msg.includes('Timeout')) {
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: '01',
-            description: 'Timeout detected',
-            component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
+          if (motor.receivedMessages.length === 0) {
+            const errorData = {
+              timestamp: new Date().toISOString(),
+              type: 'Error',
+              code: '01',
+              description: 'Timeout detected - No response from motor',
+              component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
+            }
+            this.errorLogs.push({
+              type: 'Error',
+              message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 01: Timeout detected - No response from motor`,
+            })
+            this.saveError(errorData)
           }
-          this.errorLogs.push({
-            type: 'Error',
-            message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 01: Timeout detected`,
-          })
-          this.saveError(errorData)
           motor.isActive = false
           this.activeMotorIndex = null
-        } else if (msg.includes('Limit Switch')) {
-          const limitSwitchId = this.getLimitSwitchId()
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: limitSwitchId.toString().padStart(2, '0'),
-            description: `Limit Switch triggered (ID:${limitSwitchId})`,
-            component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
-          }
-          this.errorLogs.push({
-            type: 'Error',
-            message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error ${limitSwitchId.toString().padStart(2, '0')}: Limit Switch triggered (ID:${limitSwitchId})`,
-          })
-          this.saveError(errorData)
-          motor.isActive = false
-          this.activeMotorIndex = null
-        } else if (
-          nextExpectedIndex < motor.expectedMessages.length &&
-          !msg.includes(expectedMsg)
-        ) {
-          const errorData = {
-            timestamp: new Date().toISOString(),
-            type: 'Error',
-            code: '02',
-            description: `Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
-            component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
-          }
-          this.errorLogs.push({
-            type: 'Error',
-            message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 02: Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
-          })
-          this.saveError(errorData)
-        } else if (msg.includes(expectedMsg)) {
+          return
+        }
+
+        const msgWithoutPrefix = msg.replace(/^Menu \d+ - /, '').trim()
+        if (msgWithoutPrefix === expectedMsg) {
           motor.receivedMessages.push(msg)
           const currentTime = Date.now()
-
           if (motor.receivedMessages.length === 1) {
             motor.firstMessageTime = currentTime
             motor.delay = currentTime - motor.commandSentTime
@@ -322,46 +234,20 @@ export default {
             this.checkWarnings(`Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`, motor)
             this.activeMotorIndex = null
           }
+        } else if (nextExpectedIndex < motor.expectedMessages.length) {
+          const errorData = {
+            timestamp: new Date().toISOString(),
+            type: 'Error',
+            code: '02',
+            description: `Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
+            component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
+          }
+          this.errorLogs.push({
+            type: 'Error',
+            message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 02: Not sequential feedback order (Expected: ${expectedMsg}, Received: ${msg})`,
+          })
+          this.saveError(errorData)
         }
-      }
-
-      if (
-        this.stepperStatus.isActive &&
-        this.stepperStatus.receivedMessages.length > this.stepperStatus.expectedMessages.length
-      ) {
-        const errorData = {
-          timestamp: new Date().toISOString(),
-          type: 'Error',
-          code: '03',
-          description: `Incorrect feedback count (Expected: ${this.stepperStatus.expectedMessages.length}, Received: ${this.stepperStatus.receivedMessages.length})`,
-          component: 'Stepper',
-        }
-        this.errorLogs.push({
-          type: 'Error',
-          message: `Stepper - Error 03: Incorrect feedback count (Expected: ${this.stepperStatus.expectedMessages.length}, Received: ${this.stepperStatus.receivedMessages.length})`,
-        })
-        this.saveError(errorData)
-        this.stepperStatus.isActive = false
-      }
-      if (
-        this.activeMotorIndex !== null &&
-        this.motorDcStatus[this.activeMotorIndex].receivedMessages.length >
-          this.motorDcStatus[this.activeMotorIndex].expectedMessages.length
-      ) {
-        const errorData = {
-          timestamp: new Date().toISOString(),
-          type: 'Error',
-          code: '03',
-          description: `Incorrect feedback count (Expected: ${this.motorDcStatus[this.activeMotorIndex].expectedMessages.length}, Received: ${this.motorDcStatus[this.activeMotorIndex].receivedMessages.length})`,
-          component: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}]`,
-        }
-        this.errorLogs.push({
-          type: 'Error',
-          message: `Motor Dc [${this.getMotorLabel(this.activeMotorIndex)}] - Error 03: Incorrect feedback count (Expected: ${this.motorDcStatus[this.activeMotorIndex].expectedMessages.length}, Received: ${this.motorDcStatus[this.activeMotorIndex].receivedMessages.length})`,
-        })
-        this.saveError(errorData)
-        this.motorDcStatus[this.activeMotorIndex].isActive = false
-        this.activeMotorIndex = null
       }
     },
     checkWarnings(component, status) {
@@ -532,112 +418,95 @@ export default {
       if (this.isDiagnosticRunning) return
 
       this.isDiagnosticRunning = true
+      this.abortController = new AbortController()
       console.log(`Starting full diagnostic with multiplier ${this.multiplier}x...`)
 
       const checkMotorDc = this.$refs.checkMotorDc
       if (!checkMotorDc) {
         console.error('CheckMotorDc component not found.')
         this.isDiagnosticRunning = false
+        this.abortController = null
         return
       }
 
-      // Jalankan semua motor DC satu per satu
-      for (let index = 0; index < this.motorDcStatus.length; index++) {
-        if (!this.isDiagnosticRunning) {
-          console.log('Diagnostic stopped.')
-          this.activeMotorIndex = null
-          return
-        }
-
-        const row = checkMotorDc.getRow(index)
-        const column = checkMotorDc.getColumn(index)
-
-        // Ulangi pengujian untuk motor ini sebanyak multiplier
-        for (let i = 0; i < this.multiplier; i++) {
-          if (!this.isDiagnosticRunning) {
-            console.log('Diagnostic stopped during multiplier loop.')
+      try {
+        for (let index = 0; index < this.motorDcStatus.length; index++) {
+          if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
+            console.log('Diagnostic stopped.')
             this.activeMotorIndex = null
             return
           }
 
-          console.log(
-            `Testing Motor Dc [${this.getMotorLabel(index)}] - Iteration ${i + 1}/${this.multiplier}`,
-          )
-          await checkMotorDc.sendCommand('JUAL', row, column, index)
+          const row = checkMotorDc.getRow(index)
+          const column = checkMotorDc.getColumn(index)
 
-          // Tunggu hingga pengujian selesai (termasuk timeout dari sendCommand)
-          await new Promise((resolve) => {
-            const checkCompletion = () => {
-              if (this.activeMotorIndex === null || !this.isDiagnosticRunning) {
-                resolve()
-              } else {
-                setTimeout(checkCompletion, 100)
-              }
+          for (let i = 0; i < this.multiplier; i++) {
+            if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
+              console.log('Diagnostic stopped during multiplier loop.')
+              this.activeMotorIndex = null
+              return
             }
-            checkCompletion()
-          })
-        }
-      }
 
-      // Jalankan stepper setelah semua motor selesai (tanpa multiplier)
-      if (this.isDiagnosticRunning) {
-        console.log('Testing Stepper...')
-        this.resetStepperStatus()
+            console.log(
+              `Testing Motor Dc [${this.getMotorLabel(index)}] - Iteration ${i + 1}/${this.multiplier}`,
+            )
+            const testPromise = checkMotorDc.sendCommand('JUAL', row, column, index)
 
-        const TIMEOUT_DURATION = 10000 // 10 detik untuk stepper
-        await new Promise((resolve) => {
-          const timeoutId = setTimeout(() => {
-            console.log(`Timeout after ${TIMEOUT_DURATION}ms for Stepper`)
-            this.stepperStatus.isActive = false
-            const errorData = {
-              timestamp: new Date().toISOString(),
-              type: 'Error',
-              code: '01',
-              description: 'Timeout detected - No response from stepper',
-              component: 'Stepper',
-            }
-            this.errorLogs.push({
-              type: 'Error',
-              message: `Stepper - Error 01: Timeout detected - No response from stepper`,
+            // Batasi waktu maksimum 50 detik per perintah
+            await Promise.race([
+              testPromise,
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout after 50 seconds')), 50000),
+              ),
+            ]).catch((err) => {
+              console.log(
+                `Motor Dc [${this.getMotorLabel(index)}] timed out or errored: ${err.message}`,
+              )
+              this.handleMotorDcTimeout({ index }) // Panggil timeout handler
             })
-            this.saveError(errorData)
-            resolve()
-          }, TIMEOUT_DURATION)
-
-          const checkCompletion = () => {
-            if (!this.stepperStatus.isActive || !this.isDiagnosticRunning) {
-              clearTimeout(timeoutId)
-              resolve()
-            } else {
-              setTimeout(checkCompletion, 100)
-            }
           }
-          checkCompletion()
-        })
-      }
+        }
 
-      if (this.isDiagnosticRunning) {
-        console.log('Diagnostic completed.')
-        this.isDiagnosticRunning = false
+        if (this.isDiagnosticRunning && !this.abortController.signal.aborted) {
+          console.log('Diagnostic completed.')
+          this.isDiagnosticRunning = false
+        }
+      } catch (error) {
+        console.error('Error during diagnostic:', error)
+      } finally {
+        this.abortController = null
       }
     },
-
     stopDiagnostic() {
-      this.isDiagnosticRunning = false
-      this.activeMotorIndex = null
-      this.stepperStatus.isActive = false
-      this.motorDcStatus.forEach((motor) => (motor.isActive = false))
-      console.log('Diagnostic stopped by user.')
+      if (this.isDiagnosticRunning && this.abortController) {
+        this.abortController.abort() // Batalkan semua Promise dan timeout
+        this.isDiagnosticRunning = false
+        this.activeMotorIndex = null
+        this.stepperStatus.isActive = false
+        this.motorDcStatus.forEach((motor) => (motor.isActive = false))
+        console.log('Diagnostic stopped by user.')
+      }
     },
   },
   mounted() {
     if (this.client && !this.isSimulationActive) {
+      console.log('Mengatur listener MQTT...') // Tambahkan ini
       this.client.on('message', (topic, message) => {
+        console.log('Pesan MQTT diterima:', topic, message) // Tambahkan ini
         if (topic === 'esp32/StatusRly') {
           this.handleMessage(topic, message)
         }
       })
+    } else {
+      console.log('MQTT tidak diatur. Client:', this.client, 'Simulasi:', this.isSimulationActive)
     }
+    window.addEventListener('beforeunload', this.handleBeforeUnload)
+  },
+
+  beforeUnmount() {
+    // Bersihkan event listener saat komponen dihancurkan
+    window.removeEventListener('beforeunload', this.handleBeforeUnload)
+    this.stopDiagnostic() // Hentikan diagnostik jika masih berjalan
   },
 }
 </script>

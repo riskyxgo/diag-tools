@@ -107,49 +107,46 @@ export default {
       return 'C' + col.toString().padStart(2, '0')
     },
     async sendCommand(command, row, column, index) {
-      const topic = 'esp32/CtrlRelay'
-      const message = `${this.deviceId} ${command} ${row}:${column}`
-      const TIMEOUT_DURATION = 10000 // 10 detik (bisa disesuaikan)
+      const topic = 'esp32/CtrlRelay';
+      const message = `${this.deviceId} ${command} ${row}:${column}`;
+      const TIMEOUT_DURATION = 50000; // 50 detik
 
       if (this.client && this.client.connected) {
         for (let i = 0; i < this.multiplier; i++) {
-          console.log(`Testing ${row}:${column} - Iteration ${i + 1}/${this.multiplier}`)
-          this.$emit('start-motor-test', { index, commandSentTime: Date.now() })
+          console.log(`Testing ${row}:${column} - Iteration ${i + 1}/${this.multiplier}`);
+          const commandSentTime = Date.now();
+          this.$emit('start-motor-test', { index, commandSentTime });
 
-          // Promise untuk publish dan timeout
-          await new Promise((resolve, reject) => {
-            // Set timeout
-            const timeoutId = setTimeout(() => {
-              console.log(`Timeout after ${TIMEOUT_DURATION}ms for ${row}:${column}`)
-              this.$emit('timeout-motor-test', { index }) // Emit event untuk timeout
-              resolve() // Selesaikan promise jika timeout
-            }, TIMEOUT_DURATION)
-
-            // Publish pesan MQTT
+          await new Promise((resolve) => {
             this.client.publish(topic, message, { qos: 1 }, (err) => {
               if (err) {
-                console.error('Publish error:', err)
-                clearTimeout(timeoutId) // Hentikan timeout jika ada error
-                reject(err)
+                console.error('Publish error:', err);
               } else {
-                console.log('Command sent:', message)
-                const checkCompletion = () => {
-                  if (!this.motorStatus[index].isActive) {
-                    clearTimeout(timeoutId) // Hentikan timeout jika selesai
-                    resolve()
-                  } else {
-                    setTimeout(checkCompletion, 100)
-                  }
-                }
-                checkCompletion()
+                console.log('Command sent:', message);
               }
-            })
+            });
+
+            const timeoutId = setTimeout(() => {
+              console.log(`Timeout after ${TIMEOUT_DURATION}ms for ${row}:${column}`);
+              this.$emit('timeout-motor-test', { index }); // Selalu emit timeout setelah 50 detik
+              resolve();
+            }, TIMEOUT_DURATION);
+
+            const checkCompletion = () => {
+              if (!this.motorStatus[index].isActive || this.motorStatus[index].receivedMessages.length >= this.motorStatus[index].expectedMessages.length) {
+                clearTimeout(timeoutId);
+                resolve();
+              } else {
+                setTimeout(checkCompletion, 100);
+              }
+            };
+            checkCompletion();
           }).catch((err) => {
-            console.error('Error during test:', err)
-          })
+            console.error('Error during test:', err);
+          });
         }
       } else {
-        console.error('MQTT client belum terkoneksi')
+        console.error('MQTT client belum terkoneksi');
       }
     },
   },
