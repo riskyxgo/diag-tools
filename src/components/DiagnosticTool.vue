@@ -33,7 +33,6 @@
       </div>
     </div>
 
-    <!-- Input Device ID -->
     <div class="mb-6">
       <label for="deviceId" class="block text-gray-700">Device ID:</label>
       <input
@@ -44,38 +43,31 @@
       />
     </div>
 
-    <!-- Komponen Check Motor Dc -->
     <check-motor-dc
       ref="checkMotorDc"
       :client="isSimulationActive ? simulatedClient : client"
       :device-id="deviceId"
       :motor-status="motorDcStatus"
       :multiplier="multiplier"
+      :is-diagnostic-running="isDiagnosticRunning"
       @start-motor-test="startMotorDcTest"
       @timeout-motor-test="handleMotorDcTimeout"
+      @stop-motor-test="handleMotorStop"
     />
 
-    <!-- Komponen Adjust Motor Dc -->
+    <!-- Komponen lainnya tetap sama -->
     <adjust-motor-dc
       :client="isSimulationActive ? simulatedClient : client"
       :device-id="deviceId"
     />
-
-    <!-- Komponen Check Motor Stepper -->
     <check-motor-stepper
       :client="isSimulationActive ? simulatedClient : client"
       :device-id="deviceId"
       :stepper-status="stepperStatus"
       @reset-stepper-status="resetStepperStatus"
     />
-
-    <!-- Komponen Status Pesan -->
     <status-messages :messages="statusMessages" @reset-messages="resetStatusMessages" />
-
-    <!-- Komponen Status Error -->
     <status-error :errors="errorLogs" @reset-errors="resetStatusError" />
-
-    <!-- Komponen Error Log Printout -->
     <error-log-printout
       :device-id="deviceId"
       :motor-dc-status="motorDcStatus"
@@ -165,6 +157,11 @@ export default {
     }
   },
   methods: {
+    handleMotorStop({ index }) {
+      this.motorDcStatus = this.motorDcStatus.map((motor, i) =>
+        i === index ? { ...motor, isActive: false } : motor,
+      )
+    },
     handleBeforeUnload() {
       this.stopDiagnostic() // Hentikan diagnostik saat web ditutup
     },
@@ -193,6 +190,10 @@ export default {
 
       if (this.activeMotorIndex !== null && topic === 'esp32/StatusRly') {
         const motor = this.motorDcStatus[this.activeMotorIndex]
+        if (!motor.isActive || this.activeMotorIndex === null) {
+          console.log(`Mengabaikan pesan: motor tidak aktif atau tidak ada motor aktif: ${msg}`)
+          return
+        }
         const nextExpectedIndex = motor.receivedMessages.length
         const expectedMsg = motor.expectedMessages[nextExpectedIndex]
 
@@ -414,6 +415,10 @@ export default {
       }
     },
 
+    sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms))
+    },
+
     async runDiagnostic() {
       if (this.isDiagnosticRunning) return
 
@@ -430,29 +435,30 @@ export default {
       }
 
       try {
-        for (let index = 0; index < this.motorDcStatus.length; index++) {
+        // Ulangi seluruh proses sebanyak multiplier kali
+        for (let iteration = 0; iteration < this.multiplier; iteration++) {
           if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
-            console.log('Diagnostic stopped.')
+            console.log(`Diagnostic stopped at iteration ${iteration + 1}`)
             this.activeMotorIndex = null
             return
           }
 
-          const row = checkMotorDc.getRow(index)
-          const column = checkMotorDc.getColumn(index)
+          console.log(`Starting iteration ${iteration + 1} of ${this.multiplier}`)
 
-          for (let i = 0; i < this.multiplier; i++) {
+          // Uji setiap motor dari R01:C01 hingga R06:C08
+          for (let index = 0; index < this.motorDcStatus.length; index++) {
             if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
-              console.log('Diagnostic stopped during multiplier loop.')
+              console.log(`Diagnostic stopped during iteration ${iteration + 1}`)
               this.activeMotorIndex = null
               return
             }
 
-            console.log(
-              `Testing Motor Dc [${this.getMotorLabel(index)}] - Iteration ${i + 1}/${this.multiplier}`,
-            )
+            const row = checkMotorDc.getRow(index)
+            const column = checkMotorDc.getColumn(index)
+
+            console.log(`Testing ${row}:${column} - Iteration ${iteration + 1}/${this.multiplier}`)
             const testPromise = checkMotorDc.sendCommand('JUAL', row, column, index)
 
-            // Batasi waktu maksimum 50 detik per perintah
             await Promise.race([
               testPromise,
               new Promise((_, reject) =>
@@ -462,8 +468,16 @@ export default {
               console.log(
                 `Motor Dc [${this.getMotorLabel(index)}] timed out or errored: ${err.message}`,
               )
-              this.handleMotorDcTimeout({ index }) // Panggil timeout handler
+              this.handleMotorDcTimeout({ index })
             })
+
+            if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
+              console.log(`Diagnostic stopped after testing ${row}:${column}`)
+              return
+            }
+
+            console.log(`Waiting 5 seconds before next motor...`)
+            await this.sleep(10000)
           }
         }
 
@@ -477,22 +491,30 @@ export default {
         this.abortController = null
       }
     },
+
     stopDiagnostic() {
       if (this.isDiagnosticRunning && this.abortController) {
-        this.abortController.abort() // Batalkan semua Promise dan timeout
+        this.abortController.abort()
         this.isDiagnosticRunning = false
         this.activeMotorIndex = null
         this.stepperStatus.isActive = false
-        this.motorDcStatus.forEach((motor) => (motor.isActive = false))
+
+        this.motorDcStatus = this.motorDcStatus.map((motor) => ({
+          ...motor,
+          isActive: false,
+          receivedMessages: [],
+          completed: false,
+        }))
+
         console.log('Diagnostic stopped by user.')
       }
     },
   },
   mounted() {
     if (this.client && !this.isSimulationActive) {
-      console.log('Mengatur listener MQTT...') // Tambahkan ini
+      console.log('Mengatur listener MQTT...')
       this.client.on('message', (topic, message) => {
-        console.log('Pesan MQTT diterima:', topic, message) // Tambahkan ini
+        console.log('Pesan MQTT diterima:', topic, message)
         if (topic === 'esp32/StatusRly') {
           this.handleMessage(topic, message)
         }
@@ -504,9 +526,8 @@ export default {
   },
 
   beforeUnmount() {
-    // Bersihkan event listener saat komponen dihancurkan
     window.removeEventListener('beforeunload', this.handleBeforeUnload)
-    this.stopDiagnostic() // Hentikan diagnostik jika masih berjalan
+    this.stopDiagnostic()
   },
 }
 </script>

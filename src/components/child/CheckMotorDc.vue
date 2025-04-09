@@ -17,10 +17,11 @@
             @click="sendCommand('JUAL', getRow(index), getColumn(index), index)"
             @mouseenter="hoveredIndex = index"
             @mouseleave="hoveredIndex = null"
-            :disabled="isAnyMotorActive && !motorStatus[index].isActive"
+            :disabled="(isAnyMotorActive && !motorStatus[index].isActive) || isDiagnosticRunning"
             class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-4 rounded w-full relative flex items-center justify-center"
             :class="{
-              'opacity-50 cursor-not-allowed': isAnyMotorActive && !motorStatus[index].isActive,
+              'opacity-50 cursor-not-allowed':
+                (isAnyMotorActive && !motorStatus[index].isActive) || isDiagnosticRunning,
             }"
           >
             <span
@@ -85,6 +86,7 @@ export default {
     deviceId: String,
     motorStatus: Array,
     multiplier: Number,
+    isDiagnosticRunning: Boolean, // Prop baru untuk menonaktifkan tombol
   },
   data() {
     return {
@@ -99,54 +101,76 @@ export default {
   },
   methods: {
     getRow(index) {
-      const row = Math.floor(index / 8) + 1 // 6 baris (R01 - R06)
+      const row = Math.floor(index / 8) + 1
       return 'R' + row.toString().padStart(2, '0')
     },
     getColumn(index) {
-      const col = (index % 8) + 1 // 8 kolom (C01 - C08)
+      const col = (index % 8) + 1
       return 'C' + col.toString().padStart(2, '0')
     },
     async sendCommand(command, row, column, index) {
-      const topic = 'esp32/CtrlRelay';
-      const message = `${this.deviceId} ${command} ${row}:${column}`;
-      const TIMEOUT_DURATION = 50000; // 50 detik
+      const topic = 'esp32/CtrlRelay'
+      const message = `${this.deviceId} ${command} ${row}:${column}`
+      const TIMEOUT_DURATION = 50000
 
       if (this.client && this.client.connected) {
-        for (let i = 0; i < this.multiplier; i++) {
-          console.log(`Testing ${row}:${column} - Iteration ${i + 1}/${this.multiplier}`);
-          const commandSentTime = Date.now();
-          this.$emit('start-motor-test', { index, commandSentTime });
+        const abortSignal = this.$parent.abortController?.signal
 
-          await new Promise((resolve) => {
-            this.client.publish(topic, message, { qos: 1 }, (err) => {
-              if (err) {
-                console.error('Publish error:', err);
-              } else {
-                console.log('Command sent:', message);
-              }
-            });
-
-            const timeoutId = setTimeout(() => {
-              console.log(`Timeout after ${TIMEOUT_DURATION}ms for ${row}:${column}`);
-              this.$emit('timeout-motor-test', { index }); // Selalu emit timeout setelah 50 detik
-              resolve();
-            }, TIMEOUT_DURATION);
-
-            const checkCompletion = () => {
-              if (!this.motorStatus[index].isActive || this.motorStatus[index].receivedMessages.length >= this.motorStatus[index].expectedMessages.length) {
-                clearTimeout(timeoutId);
-                resolve();
-              } else {
-                setTimeout(checkCompletion, 100);
-              }
-            };
-            checkCompletion();
-          }).catch((err) => {
-            console.error('Error during test:', err);
-          });
+        if (abortSignal?.aborted) {
+          console.log(`Aborted testing ${row}:${column} before starting`)
+          this.$emit('stop-motor-test', { index })
+          return
         }
+
+        console.log(`Testing ${row}:${column}`)
+        const commandSentTime = Date.now()
+        this.$emit('start-motor-test', { index, commandSentTime })
+
+        await new Promise((resolve) => {
+          this.client.publish(topic, message, { qos: 1 }, (err) => {
+            if (err) {
+              console.error('Publish error:', err)
+            } else {
+              console.log('Command sent:', message)
+            }
+          })
+
+          const timeoutId = setTimeout(() => {
+            console.log(`Timeout after ${TIMEOUT_DURATION}ms for ${row}:${column}`)
+            this.$emit('timeout-motor-test', { index })
+            resolve()
+          }, TIMEOUT_DURATION)
+
+          const abortListener = () => {
+            clearTimeout(timeoutId)
+            this.$emit('stop-motor-test', { index })
+            resolve()
+          }
+          if (abortSignal) {
+            abortSignal.addEventListener('abort', abortListener)
+          }
+
+          const checkCompletion = () => {
+            if (
+              !this.motorStatus[index].isActive ||
+              this.motorStatus[index].receivedMessages.length >=
+                this.motorStatus[index].expectedMessages.length
+            ) {
+              clearTimeout(timeoutId)
+              if (abortSignal) {
+                abortSignal.removeEventListener('abort', abortListener)
+              }
+              resolve()
+            } else {
+              setTimeout(checkCompletion, 100)
+            }
+          }
+          checkCompletion()
+        }).catch((err) => {
+          console.error('Error during test:', err)
+        })
       } else {
-        console.error('MQTT client belum terkoneksi');
+        console.error('MQTT client belum terkoneksi')
       }
     },
   },

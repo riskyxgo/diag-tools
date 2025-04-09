@@ -1,4 +1,27 @@
 <!-- src/components/child/ErrorLogPrintout.vue -->
+<template>
+  <div class="mb-8">
+    <div class="flex justify-between items-center mb-2">
+      <h2 class="text-xl font-semibold">Error Log Printout</h2>
+      <div class="flex gap-2">
+        <button
+          @click="printErrors"
+          class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+        >
+          Download PDF
+        </button>
+        <button
+          @click="clearErrors"
+          class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
+        >
+          Clear Errors
+        </button>
+      </div>
+    </div>
+    <!-- Anda bisa menambahkan konten lain di sini jika ingin menampilkan preview atau info tambahan -->
+  </div>
+</template>
+
 <script>
 import jsPDF from 'jspdf'
 import Chart from 'chart.js/auto'
@@ -73,9 +96,10 @@ export default {
       return truncatedText
     },
     async createGroupChart(motors, title) {
-      const canvas = document.getElementById('tempChart')
+      const canvas = document.createElement('canvas') // Buat canvas sementara
       canvas.width = 600
       canvas.height = 400
+      document.body.appendChild(canvas) // Tambahkan ke DOM sementara
 
       const ctx = canvas.getContext('2d')
       const datasets = motors
@@ -132,6 +156,7 @@ export default {
       await new Promise((resolve) => setTimeout(resolve, 500))
       const imgData = canvas.toDataURL('image/png')
       chart.destroy()
+      document.body.removeChild(canvas) // Hapus canvas setelah selesai
       return imgData
     },
     async printErrors() {
@@ -161,22 +186,27 @@ export default {
         .map((motor, index) => (motor.receivedMessages.length > 0 ? { motor, index } : null))
         .filter((item) => item !== null)
 
-      testedMotors.forEach(({ motor, index }) => {
-        if (y > pageHeight - 30) {
-          doc.addPage()
-          y = 10
-        }
-        const { result } = this.getResultAndCode(motor, index)
-        const avgDelay = this.calculateAverage(motor.delayHistory)
-        const avgTotalTime = this.calculateAverage(motor.totalTimeHistory)
-        const iterations = motor.testCount
-        doc.text(`ID:[${this.getMotorLabel(index)}]`, 10, y)
-        doc.text(avgDelay, 40, y)
-        doc.text(avgTotalTime, 70, y)
-        doc.text(`${iterations}x`, 100, y)
-        doc.text(result, 130, y)
+      if (testedMotors.length === 0) {
+        doc.text('Tidak ada data diagnostik Motor DC.', 10, y)
         y += 5
-      })
+      } else {
+        testedMotors.forEach(({ motor, index }) => {
+          if (y > pageHeight - 30) {
+            doc.addPage()
+            y = 10
+          }
+          const { result } = this.getResultAndCode(motor, index)
+          const avgDelay = this.calculateAverage(motor.delayHistory)
+          const avgTotalTime = this.calculateAverage(motor.totalTimeHistory)
+          const iterations = motor.testCount
+          doc.text(`ID:[${this.getMotorLabel(index)}]`, 10, y)
+          doc.text(avgDelay, 40, y)
+          doc.text(avgTotalTime, 70, y)
+          doc.text(`${iterations}x`, 100, y)
+          doc.text(result, 130, y)
+          y += 5
+        })
+      }
 
       // Motor Stepper
       y += 5
@@ -196,11 +226,10 @@ export default {
       doc.line(10, y + 1, 190, y + 1)
       y += 5
 
-      if (this.stepperStatus.receivedMessages.length > 0) {
-        if (y > pageHeight - 30) {
-          doc.addPage()
-          y = 10
-        }
+      if (this.stepperStatus.receivedMessages.length === 0) {
+        doc.text('Tidak ada data diagnostik Motor Stepper.', 10, y)
+        y += 5
+      } else {
         const { result } = this.getResultAndCode(this.stepperStatus, null)
         const avgDelay = this.calculateAverage(this.stepperStatus.delayHistory)
         const avgTotalTime = this.calculateAverage(this.stepperStatus.totalTimeHistory)
