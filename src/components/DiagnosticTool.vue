@@ -3,7 +3,10 @@
   <div class="p-4">
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-2xl font-bold">Diagnostic Tool Motor Control</h1>
-      <button @click="showConfig = !showConfig" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+      <button
+        @click="showConfig = !showConfig"
+        class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+      >
         {{ showConfig ? 'Hide Config' : 'Show Config' }}
       </button>
     </div>
@@ -28,7 +31,10 @@
           class="border rounded p-2 w-20"
         />
       </div>
-      <button @click="applyConfig" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">
+      <button
+        @click="applyConfig"
+        class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
+      >
         Apply Configuration
       </button>
     </div>
@@ -173,7 +179,7 @@ export default {
   },
   methods: {
     initializeMotorStatus() {
-      this.motorDcStatus = [];
+      this.motorDcStatus = []
       this.rowConfig.forEach((row) => {
         for (let col = 0; col < row.columns; col++) {
           this.motorDcStatus.push({
@@ -197,27 +203,35 @@ export default {
             testCount: 0,
             delayHistory: [],
             totalTimeHistory: [],
-          });
+          })
         }
-      });
+      })
     },
     applyConfig() {
       this.rowConfig.forEach((row, index) => {
         if (!row.address || row.columns < 1 || row.columns > 8) {
-          alert(`Invalid config for Row ${index + 1}`);
-          return;
+          alert(`Invalid config for Row ${index + 1}`)
+          return
         }
-      });
-      this.initializeMotorStatus();
-      this.showConfig = false;
+      })
+      this.initializeMotorStatus()
+      this.showConfig = false
     },
     handleMotorStop({ index }) {
       this.motorDcStatus = this.motorDcStatus.map((motor, i) =>
         i === index ? { ...motor, isActive: false } : motor,
       )
     },
-    handleBeforeUnload() {
-      this.stopDiagnostic()
+    handleBeforeUnload(event) {
+      if (this.isDiagnosticRunning) {
+        // Menampilkan pesan konfirmasi saat diagnostik berjalan
+        const confirmationMessage =
+          'Diagnostic is running. Are you sure you want to leave and stop the process?'
+        event.preventDefault()
+        event.returnValue = confirmationMessage // Untuk browser modern
+        return confirmationMessage // Untuk browser lama
+      }
+      this.stopDiagnostic() // Hentikan diagnostik jika tidak ada peringatan
     },
     saveError(error) {
       let errors = JSON.parse(localStorage.getItem('errors')) || []
@@ -336,16 +350,16 @@ export default {
       }
     },
     getMotorLabel(index) {
-      let totalCols = 0;
+      let totalCols = 0
       for (let i = 0; i < this.rowConfig.length; i++) {
         if (index < totalCols + this.rowConfig[i].columns) {
-          const rowDisplay = this.rowConfig[i].display || this.rowConfig[i].address;
-          const col = (index - totalCols) + 1;
-          return `${rowDisplay}:C${col.toString().padStart(2, '0')}`;
+          const rowDisplay = this.rowConfig[i].display || this.rowConfig[i].address
+          const col = index - totalCols + 1
+          return `${rowDisplay}:C${col.toString().padStart(2, '0')}`
         }
-        totalCols += this.rowConfig[i].columns;
+        totalCols += this.rowConfig[i].columns
       }
-      return 'Unknown';
+      return 'Unknown'
     },
     resetStatusMessages() {
       this.statusMessages = []
@@ -513,7 +527,9 @@ export default {
 
               const rowAddress = row.address
               const column = `C${col.toString().padStart(2, '0')}`
-              console.log(`Testing ${rowAddress}:${column} - Iteration ${iteration + 1}/${this.multiplier}`)
+              console.log(
+                `Testing ${rowAddress}:${column} - Iteration ${iteration + 1}/${this.multiplier}`,
+              )
               const testPromise = checkMotorDc.sendCommand('JUAL', rowAddress, column, motorIndex)
 
               await Promise.race([
@@ -581,9 +597,11 @@ export default {
     } else {
       console.log('MQTT tidak diatur. Client:', this.client, 'Simulasi:', this.isSimulationActive)
     }
+    // Tambahkan event listener untuk beforeunload
     window.addEventListener('beforeunload', this.handleBeforeUnload)
   },
   beforeUnmount() {
+    // Hapus event listener saat komponen di-unmount
     window.removeEventListener('beforeunload', this.handleBeforeUnload)
     this.stopDiagnostic()
   },
