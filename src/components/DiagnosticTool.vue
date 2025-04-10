@@ -550,7 +550,7 @@ export default {
               }
 
               console.log(`Waiting 10 seconds before next motor...`)
-              await this.sleep(10000)
+              await this.sleep(2000)
               motorIndex++
             }
           }
