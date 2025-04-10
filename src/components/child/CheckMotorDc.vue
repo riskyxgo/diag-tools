@@ -12,7 +12,7 @@
     </div>
     <div v-if="isOpen">
       <div class="grid grid-cols-4 md:grid-cols-8 gap-4">
-        <div v-for="(btn, index) in 48" :key="'dc' + index" class="relative">
+        <div v-for="(motor, index) in totalMotors" :key="'dc' + index" class="relative">
           <button
             @click="sendCommand('JUAL', getRow(index), getColumn(index), index)"
             @mouseenter="hoveredIndex = index"
@@ -53,7 +53,7 @@
               {{
                 motorStatus[index] && motorStatus[index].completed
                   ? 'OK'
-                  : `${getRow(index)}:${getColumn(index)}`
+                  : `${getRowDisplay(index)}:${getColumn(index)}`
               }}
             </span>
           </button>
@@ -86,7 +86,8 @@ export default {
     deviceId: String,
     motorStatus: Array,
     multiplier: Number,
-    isDiagnosticRunning: Boolean, // Prop baru untuk menonaktifkan tombol
+    isDiagnosticRunning: Boolean,
+    rowConfig: Array,
   },
   data() {
     return {
@@ -95,18 +96,44 @@ export default {
     }
   },
   computed: {
+    totalMotors() {
+      return this.rowConfig.reduce((sum, row) => sum + row.columns, 0)
+    },
     isAnyMotorActive() {
       return this.motorStatus.some((motor) => motor.isActive)
     },
   },
   methods: {
     getRow(index) {
-      const row = Math.floor(index / 8) + 1
-      return 'R' + row.toString().padStart(2, '0')
+      let totalCols = 0
+      for (let i = 0; i < this.rowConfig.length; i++) {
+        if (index < totalCols + this.rowConfig[i].columns) {
+          return this.rowConfig[i].address
+        }
+        totalCols += this.rowConfig[i].columns
+      }
+      return 'R01'
+    },
+    getRowDisplay(index) {
+      let totalCols = 0
+      for (let i = 0; i < this.rowConfig.length; i++) {
+        if (index < totalCols + this.rowConfig[i].columns) {
+          return this.rowConfig[i].display || this.rowConfig[i].address
+        }
+        totalCols += this.rowConfig[i].columns
+      }
+      return 'R01'
     },
     getColumn(index) {
-      const col = (index % 8) + 1
-      return 'C' + col.toString().padStart(2, '0')
+      let totalCols = 0
+      for (let i = 0; i < this.rowConfig.length; i++) {
+        if (index < totalCols + this.rowConfig[i].columns) {
+          const col = (index - totalCols) + 1
+          return `C${col.toString().padStart(2, '0')}`
+        }
+        totalCols += this.rowConfig[i].columns
+      }
+      return 'C01'
     },
     async sendCommand(command, row, column, index) {
       const topic = 'esp32/CtrlRelay'

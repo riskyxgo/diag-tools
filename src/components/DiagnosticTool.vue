@@ -3,7 +3,36 @@
   <div class="p-4">
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-2xl font-bold">Diagnostic Tool Motor Control</h1>
+      <button @click="showConfig = !showConfig" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+        {{ showConfig ? 'Hide Config' : 'Show Config' }}
+      </button>
     </div>
+
+    <!-- UI Konfigurasi -->
+    <div v-if="showConfig" class="mb-6 p-4 border rounded">
+      <h2 class="text-xl font-semibold mb-2">Row Configuration</h2>
+      <div v-for="(row, index) in rowConfig" :key="index" class="mb-4">
+        <label :for="'row-' + index" class="block text-gray-700">Row {{ index + 1 }}:</label>
+        <input
+          :id="'row-' + index"
+          v-model="row.address"
+          placeholder="Address (e.g., R01)"
+          class="border rounded p-2 mr-2"
+        />
+        <input
+          type="number"
+          v-model.number="row.columns"
+          min="1"
+          max="8"
+          placeholder="Columns (1-8)"
+          class="border rounded p-2 w-20"
+        />
+      </div>
+      <button @click="applyConfig" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">
+        Apply Configuration
+      </button>
+    </div>
+
     <div class="flex justify-center items-center mb-4">
       <div class="flex gap-4">
         <button
@@ -50,15 +79,16 @@
       :motor-status="motorDcStatus"
       :multiplier="multiplier"
       :is-diagnostic-running="isDiagnosticRunning"
+      :row-config="rowConfig"
       @start-motor-test="startMotorDcTest"
       @timeout-motor-test="handleMotorDcTimeout"
       @stop-motor-test="handleMotorStop"
     />
 
-    <!-- Komponen lainnya tetap sama -->
     <adjust-motor-dc
       :client="isSimulationActive ? simulatedClient : client"
       :device-id="deviceId"
+      :row-config="rowConfig"
     />
     <check-motor-stepper
       :client="isSimulationActive ? simulatedClient : client"
@@ -108,6 +138,14 @@ export default {
       isSimulationActive: false,
       isDiagnosticRunning: false,
       multiplier: 1,
+      showConfig: false,
+      rowConfig: [
+        { address: 'R01', columns: 8 },
+        { address: 'R06', columns: 6, display: 'R02' },
+        { address: 'R03', columns: 6 },
+        { address: 'R04', columns: 4 },
+        { address: 'R05', columns: 5 },
+      ],
       stepperStatus: {
         expectedMessages: [
           'Stepper putar naik',
@@ -128,42 +166,58 @@ export default {
         delayHistory: [],
         totalTimeHistory: [],
       },
-      motorDcStatus: Array(48)
-        .fill(null)
-        .map(() => ({
-          expectedMessages: [
-            'Stepper putar naik',
-            'Stepper sampai posisi',
-            'Relay Aktif Motor Berputar',
-            'Relay OFF Motor Berhenti',
-            'Stepper putar turun',
-            'Stepper posisi terbawah',
-            'Stepper Disable',
-          ],
-          receivedMessages: [],
-          commandSentTime: null,
-          firstMessageTime: null,
-          lastMessageTime: null,
-          delay: null,
-          totalTime: null,
-          completed: false,
-          isActive: false,
-          testCount: 0,
-          delayHistory: [],
-          totalTimeHistory: [],
-        })),
+      motorDcStatus: [],
       activeMotorIndex: null,
       abortController: null,
     }
   },
   methods: {
+    initializeMotorStatus() {
+      this.motorDcStatus = [];
+      this.rowConfig.forEach((row) => {
+        for (let col = 0; col < row.columns; col++) {
+          this.motorDcStatus.push({
+            expectedMessages: [
+              'Stepper putar naik',
+              'Stepper sampai posisi',
+              'Relay Aktif Motor Berputar',
+              'Relay OFF Motor Berhenti',
+              'Stepper putar turun',
+              'Stepper posisi terbawah',
+              'Stepper Disable',
+            ],
+            receivedMessages: [],
+            commandSentTime: null,
+            firstMessageTime: null,
+            lastMessageTime: null,
+            delay: null,
+            totalTime: null,
+            completed: false,
+            isActive: false,
+            testCount: 0,
+            delayHistory: [],
+            totalTimeHistory: [],
+          });
+        }
+      });
+    },
+    applyConfig() {
+      this.rowConfig.forEach((row, index) => {
+        if (!row.address || row.columns < 1 || row.columns > 8) {
+          alert(`Invalid config for Row ${index + 1}`);
+          return;
+        }
+      });
+      this.initializeMotorStatus();
+      this.showConfig = false;
+    },
     handleMotorStop({ index }) {
       this.motorDcStatus = this.motorDcStatus.map((motor, i) =>
         i === index ? { ...motor, isActive: false } : motor,
       )
     },
     handleBeforeUnload() {
-      this.stopDiagnostic() // Hentikan diagnostik saat web ditutup
+      this.stopDiagnostic()
     },
     saveError(error) {
       let errors = JSON.parse(localStorage.getItem('errors')) || []
@@ -282,9 +336,16 @@ export default {
       }
     },
     getMotorLabel(index) {
-      const row = Math.floor(index / 8) + 1
-      const col = (index % 8) + 1
-      return `R${row.toString().padStart(2, '0')}:C${col.toString().padStart(2, '0')}`
+      let totalCols = 0;
+      for (let i = 0; i < this.rowConfig.length; i++) {
+        if (index < totalCols + this.rowConfig[i].columns) {
+          const rowDisplay = this.rowConfig[i].display || this.rowConfig[i].address;
+          const col = (index - totalCols) + 1;
+          return `${rowDisplay}:C${col.toString().padStart(2, '0')}`;
+        }
+        totalCols += this.rowConfig[i].columns;
+      }
+      return 'Unknown';
     },
     resetStatusMessages() {
       this.statusMessages = []
@@ -414,14 +475,11 @@ export default {
         this.isDiagnosticRunning = false
       }
     },
-
     sleep(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms))
     },
-
     async runDiagnostic() {
       if (this.isDiagnosticRunning) return
-
       this.isDiagnosticRunning = true
       this.abortController = new AbortController()
       console.log(`Starting full diagnostic with multiplier ${this.multiplier}x...`)
@@ -435,7 +493,6 @@ export default {
       }
 
       try {
-        // Ulangi seluruh proses sebanyak multiplier kali
         for (let iteration = 0; iteration < this.multiplier; iteration++) {
           if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
             console.log(`Diagnostic stopped at iteration ${iteration + 1}`)
@@ -444,40 +501,42 @@ export default {
           }
 
           console.log(`Starting iteration ${iteration + 1} of ${this.multiplier}`)
+          let motorIndex = 0
+          for (let rowIdx = 0; rowIdx < this.rowConfig.length; rowIdx++) {
+            const row = this.rowConfig[rowIdx]
+            for (let col = 1; col <= row.columns; col++) {
+              if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
+                console.log(`Diagnostic stopped during iteration ${iteration + 1}`)
+                this.activeMotorIndex = null
+                return
+              }
 
-          // Uji setiap motor dari R01:C01 hingga R06:C08
-          for (let index = 0; index < this.motorDcStatus.length; index++) {
-            if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
-              console.log(`Diagnostic stopped during iteration ${iteration + 1}`)
-              this.activeMotorIndex = null
-              return
+              const rowAddress = row.address
+              const column = `C${col.toString().padStart(2, '0')}`
+              console.log(`Testing ${rowAddress}:${column} - Iteration ${iteration + 1}/${this.multiplier}`)
+              const testPromise = checkMotorDc.sendCommand('JUAL', rowAddress, column, motorIndex)
+
+              await Promise.race([
+                testPromise,
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('Timeout after 50 seconds')), 50000),
+                ),
+              ]).catch((err) => {
+                console.log(
+                  `Motor Dc [${this.getMotorLabel(motorIndex)}] timed out or errored: ${err.message}`,
+                )
+                this.handleMotorDcTimeout({ index: motorIndex })
+              })
+
+              if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
+                console.log(`Diagnostic stopped after testing ${rowAddress}:${column}`)
+                return
+              }
+
+              console.log(`Waiting 10 seconds before next motor...`)
+              await this.sleep(10000)
+              motorIndex++
             }
-
-            const row = checkMotorDc.getRow(index)
-            const column = checkMotorDc.getColumn(index)
-
-            console.log(`Testing ${row}:${column} - Iteration ${iteration + 1}/${this.multiplier}`)
-            const testPromise = checkMotorDc.sendCommand('JUAL', row, column, index)
-
-            await Promise.race([
-              testPromise,
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout after 50 seconds')), 50000),
-              ),
-            ]).catch((err) => {
-              console.log(
-                `Motor Dc [${this.getMotorLabel(index)}] timed out or errored: ${err.message}`,
-              )
-              this.handleMotorDcTimeout({ index })
-            })
-
-            if (!this.isDiagnosticRunning || this.abortController.signal.aborted) {
-              console.log(`Diagnostic stopped after testing ${row}:${column}`)
-              return
-            }
-
-            console.log(`Waiting 5 seconds before next motor...`)
-            await this.sleep(10000)
           }
         }
 
@@ -491,7 +550,6 @@ export default {
         this.abortController = null
       }
     },
-
     stopDiagnostic() {
       if (this.isDiagnosticRunning && this.abortController) {
         this.abortController.abort()
@@ -511,6 +569,7 @@ export default {
     },
   },
   mounted() {
+    this.initializeMotorStatus()
     if (this.client && !this.isSimulationActive) {
       console.log('Mengatur listener MQTT...')
       this.client.on('message', (topic, message) => {
@@ -524,7 +583,6 @@ export default {
     }
     window.addEventListener('beforeunload', this.handleBeforeUnload)
   },
-
   beforeUnmount() {
     window.removeEventListener('beforeunload', this.handleBeforeUnload)
     this.stopDiagnostic()
